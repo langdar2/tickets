@@ -4,5 +4,10 @@ services:
     ports:
       - "5555:5555"
     volumes:
-      - ./data.json:/app/data.json
+      - ticket-data:/app/data
+    environment:
+      - DATA_DIR=/app/data
     restart: unless-stopped
+
+volumes:
+  ticket-data:

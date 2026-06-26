@@ -9,7 +9,8 @@ from curl_cffi import requests as cffi_requests
 from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
-DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data.json")
+DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
 UNAVAILABLE = ["ausverkauft", "sold out", "nicht verfügbar", "currently not available",
                "no tickets available", "leider keine tickets"]
