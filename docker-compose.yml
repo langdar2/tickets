@@ -1,0 +1,8 @@
+services:
+  tickets:
+    image: ghcr.io/langdar2/tickets:latest
+    ports:
+      - "5555:5555"
+    volumes:
+      - ./data.json:/app/data.json
+    restart: unless-stopped
