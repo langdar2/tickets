@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ticket Checker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, system-ui, sans-serif; background: #0f0f0f; color: #e0e0e0; padding: 2rem; max-width: 800px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #fff; }
+    h2 { font-size: 1.1rem; margin: 2rem 0 0.8rem; color: #aaa; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+
+    .card { background: #1a1a1a; border-radius: 10px; padding: 1.2rem; margin-bottom: 0.8rem; border: 1px solid #2a2a2a; }
+    .event-header { display: flex; justify-content: space-between; align-items: center; }
+    .event-name { font-weight: 600; font-size: 1rem; }
+    .event-url { font-size: 0.8rem; color: #666; word-break: break-all; margin-top: 0.3rem; }
+    .event-meta { display: flex; gap: 1rem; margin-top: 0.6rem; font-size: 0.8rem; color: #888; }
+
+    .badge { padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+    .badge-available { background: #0a3d0a; color: #4ade80; }
+    .badge-unavailable { background: #3d0a0a; color: #f87171; }
+    .badge-unknown { background: #3d3d0a; color: #facc15; }
+    .badge-pending { background: #1a1a2e; color: #818cf8; }
+    .badge-queue { background: #2e1a2e; color: #c084fc; }
+
+    .actions { display: flex; gap: 0.5rem; }
+    .actions a { color: #666; font-size: 0.8rem; text-decoration: none; }
+    .actions a:hover { color: #fff; }
+
+    form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    input[type="text"], input[type="url"], input[type="tel"] {
+      background: #111; border: 1px solid #333; border-radius: 6px; padding: 0.6rem 0.8rem;
+      color: #fff; font-size: 0.9rem; flex: 1; min-width: 150px;
+    }
+    input:focus { outline: none; border-color: #555; }
+    button, .btn {
+      background: #2563eb; color: #fff; border: none; border-radius: 6px;
+      padding: 0.6rem 1.2rem; cursor: pointer; font-size: 0.9rem; font-weight: 500;
+      text-decoration: none; display: inline-block; white-space: nowrap;
+    }
+    button:hover, .btn:hover { background: #1d4ed8; }
+    .btn-outline { background: transparent; border: 1px solid #333; color: #aaa; }
+    .btn-outline:hover { border-color: #555; color: #fff; background: transparent; }
+
+    .settings-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .hint { font-size: 0.75rem; color: #555; margin-top: 0.4rem; line-height: 1.4; }
+    .notified-badge { font-size: 0.75rem; color: #4ade80; }
+    .empty { color: #444; text-align: center; padding: 2rem; }
+  </style>
+</head>
+<body>
+
+<h1>Ticket Checker</h1>
+
+<!-- WhatsApp Settings -->
+<h2>WhatsApp Benachrichtigung</h2>
+<div class="card">
+  <form action="/settings" method="post">
+    <div class="settings-row">
+      <input type="tel" name="phone" placeholder="+49170..." value="{{ data.whatsapp.phone }}" style="max-width:180px">
+      <input type="text" name="apikey" placeholder="API Key" value="{{ data.whatsapp.apikey }}">
+      <button type="submit">Speichern</button>
+    </div>
+  </form>
+  <p class="hint">
+    Einmalig einrichten: Sende <strong>"I allow callmebot to send me messages"</strong> an
+    <strong>+34 644 31 89 88</strong> auf WhatsApp. Du bekommst dann deinen API Key.
+    <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" style="color:#2563eb">Anleitung</a>
+  </p>
+</div>
+
+<!-- Add Event -->
+<h2>Event hinzufügen</h2>
+<div class="card">
+  <form action="/add" method="post">
+    <input type="text" name="name" placeholder="Name (optional)">
+    <input type="url" name="url" placeholder="https://www.eventim.de/event/..." required>
+    <button type="submit">Hinzufügen</button>
+  </form>
+</div>
+
+<!-- Events -->
+<h2>
+  Überwachte Events
+  <a href="/check-now" class="btn btn-outline" style="float:right; font-size:0.75rem; padding:0.3rem 0.8rem;">Jetzt prüfen</a>
+</h2>
+
+{% if not data.events %}
+  <div class="card"><p class="empty">Noch keine Events. Füge eine eventim.de URL hinzu.</p></div>
+{% endif %}
+
+{% for event in data.events %}
+<div class="card">
+  <div class="event-header">
+    <div>
+      <div class="event-name">{{ event.name }}</div>
+      <div class="event-url"><a href="{{ event.url }}" target="_blank" style="color:#555">{{ event.url }}</a></div>
+    </div>
+    <span class="badge badge-{{ event.last_status }}">
+      {% if event.last_status == 'available' %}Verfügbar
+      {% elif event.last_status == 'unavailable' %}Nicht verfügbar
+      {% elif event.last_status == 'queue' %}Warteschlange
+      {% elif event.last_status == 'pending' %}Ausstehend
+      {% else %}Unklar{% endif %}
+    </span>
+  </div>
+  <div class="event-meta">
+    {% if event.last_check %}<span>Letzter Check: {{ event.last_check }}</span>{% endif %}
+    {% if event.last_detail %}<span>Detail: {{ event.last_detail }}</span>{% endif %}
+    {% if event.notified %}<span class="notified-badge">Benachrichtigt {{ event.get('notified_at', '') }}</span>{% endif %}
+    <span class="actions">
+      {% if event.notified %}<a href="/reset/{{ loop.index0 }}">Reset</a>{% endif %}
+      <a href="/delete/{{ loop.index0 }}" onclick="return confirm('Löschen?')">Löschen</a>
+    </span>
+  </div>
+</div>
+{% endfor %}
+
+</body>
+</html>
