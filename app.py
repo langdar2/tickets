@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -12,10 +13,7 @@ app = Flask(__name__)
 DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 
-UNAVAILABLE = ["ausverkauft", "sold out", "nicht verfügbar", "currently not available",
-               "no tickets available", "leider keine tickets"]
-AVAILABLE = ["in den warenkorb", "tickets sichern", "karten kaufen", "jetzt buchen",
-             "jetzt tickets sichern"]
+EVENTIM_API = "https://public-api.eventim.com/websearch/search/api/exploration/v2/productGroups"
 
 
 def load_data():
@@ -30,39 +28,66 @@ def save_data(data):
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def extract_product_id(url):
+    """Extract product ID from eventim URL like /event/blink-182-waldbuehne-berlin-21739388/"""
+    m = re.search(r"-(\d{6,})/?$", url.rstrip("/"))
+    return m.group(1) if m else None
+
+
 def check_event(url):
-    """Return (available: bool|None, detail: str)."""
+    """Check ticket availability via eventim public API.
+    Returns (available: bool|None, detail: str).
+    """
+    product_id = extract_product_id(url)
+    if not product_id:
+        return None, "Kann Produkt-ID nicht aus URL extrahieren"
+
+    # Extract search term from URL path for API query
+    path = url.rstrip("/").split("/")[-1]  # e.g. blink-182-waldbuehne-berlin-21739388
+    # Remove product ID suffix and convert dashes to spaces
+    search_slug = re.sub(r"-\d{6,}$", "", path).replace("-", " ")
+
     try:
-        resp = cffi_requests.get(url, impersonate="chrome", timeout=20, allow_redirects=False)
+        r = cffi_requests.get(EVENTIM_API, impersonate="chrome", timeout=20, params={
+            "search_term": search_slug,
+            "retail_partner": "EVE",
+            "language": "de",
+        })
+        r.raise_for_status()
+        data = r.json()
     except Exception as e:
-        return None, f"error: {e}"
+        return None, f"API error: {e}"
 
-    # Queue/waiting room redirect = event is live/hot, likely selling
-    location = resp.headers.get("location", "")
-    if resp.status_code in (301, 302) and "queue" in location.lower():
-        return None, "Warteschlange aktiv (Event ist live)"
+    # Find our product in results
+    for pg in data.get("productGroups", []):
+        for p in pg.get("products", []):
+            if str(p.get("productId")) == product_id:
+                status = p.get("status", "")
+                tags = p.get("tags", [])
+                fansale_only = "FANSALE" in tags and status == "Available"
 
-    # Follow redirect manually if it's a normal one
-    if resp.status_code in (301, 302) and "queue" not in location.lower():
-        try:
-            resp = cffi_requests.get(location, impersonate="chrome", timeout=20, allow_redirects=False)
-        except Exception as e:
-            return None, f"error bei redirect: {e}"
+                # ponytail: FANSALE tag = resale only, not regular tickets
+                if fansale_only and "TICKETDIRECT" in tags:
+                    # Has both regular and fansale - could be either
+                    # Check if there are non-FANSALE products in same group
+                    other_products = [op for op in pg.get("products", [])
+                                      if str(op.get("productId")) != product_id
+                                      and "FANSALE" not in op.get("tags", [])]
+                    if not other_products:
+                        return False, f"Nur Fansale (Wiederverkauf)"
 
-    if resp.status_code != 200:
-        return None, f"HTTP {resp.status_code}"
+                if status == "Available" and "FANSALE" not in tags:
+                    return True, "Tickets verfügbar (regulär)"
+                elif status == "Available" and "FANSALE" in tags:
+                    return False, "Nur Fansale (Wiederverkauf)"
+                elif status == "SoldOut":
+                    return False, "Ausverkauft"
+                elif status == "Cancelled":
+                    return False, "Abgesagt"
+                else:
+                    return None, f"Status: {status}"
 
-    html = resp.text.lower()
-
-    for signal in UNAVAILABLE:
-        if signal in html:
-            return False, signal
-
-    for signal in AVAILABLE:
-        if signal in html:
-            return True, signal
-
-    return None, "status unklar"
+    return None, "Event nicht in API gefunden"
 
 
 def send_whatsapp(phone, apikey, message):
@@ -86,19 +111,12 @@ def run_checks(data):
             event["last_status"] = "available"
         elif available is False:
             event["last_status"] = "unavailable"
-        elif "warteschlange" in detail.lower():
-            event["last_status"] = "queue"
         else:
             event["last_status"] = "unknown"
         event["last_detail"] = detail
 
-        should_notify = (available and not event.get("notified")) or \
-                        (event["last_status"] == "queue" and not event.get("notified"))
-        if should_notify:
-            if available:
-                msg = f"Tickets verfuegbar!\n{event.get('name', '')}\n{event['url']}"
-            else:
-                msg = f"Warteschlange aktiv! Tickets koennten verfuegbar sein.\n{event.get('name', '')}\n{event['url']}"
+        if available and not event.get("notified"):
+            msg = f"Tickets verfuegbar!\n{event.get('name', '')}\n{event['url']}"
             if send_whatsapp(data["whatsapp"]["phone"], data["whatsapp"]["apikey"], msg):
                 event["notified"] = True
                 event["notified_at"] = datetime.now().strftime("%d.%m.%Y %H:%M")

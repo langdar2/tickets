@@ -21,7 +21,6 @@
     .badge-unavailable { background: #3d0a0a; color: #f87171; }
     .badge-unknown { background: #3d3d0a; color: #facc15; }
     .badge-pending { background: #1a1a2e; color: #818cf8; }
-    .badge-queue { background: #2e1a2e; color: #c084fc; }
 
     .actions { display: flex; gap: 0.5rem; }
     .actions a { color: #666; font-size: 0.8rem; text-decoration: none; }
@@ -99,7 +98,6 @@
     <span class="badge badge-{{ event.last_status }}">
       {% if event.last_status == 'available' %}Verfügbar
       {% elif event.last_status == 'unavailable' %}Nicht verfügbar
-      {% elif event.last_status == 'queue' %}Warteschlange
       {% elif event.last_status == 'pending' %}Ausstehend
       {% else %}Unklar{% endif %}
     </span>
