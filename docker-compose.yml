@@ -7,6 +7,7 @@ services:
       - ticket-data:/app/data
     environment:
       - DATA_DIR=/app/data
+      - TZ=Europe/Berlin
     restart: unless-stopped
 
 volumes:
