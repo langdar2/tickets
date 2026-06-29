@@ -37,55 +37,52 @@ def extract_product_id(url):
 def check_event(url):
     """Check ticket availability via eventim public API.
     Returns (available: bool|None, detail: str).
+
+    Uses two API calls: one with in_stock=true to see what's actually buyable,
+    one without to find the event at all. The API's 'status' field is unreliable —
+    'Available' just means the event exists, not that tickets are in stock.
     """
     product_id = extract_product_id(url)
     if not product_id:
         return None, "Kann Produkt-ID nicht aus URL extrahieren"
 
-    # Extract search term from URL path for API query
-    path = url.rstrip("/").split("/")[-1]  # e.g. blink-182-waldbuehne-berlin-21739388
-    # Remove product ID suffix and convert dashes to spaces
+    path = url.rstrip("/").split("/")[-1]
     search_slug = re.sub(r"-\d{6,}$", "", path).replace("-", " ")
+    base_params = {"search_term": search_slug, "retail_partner": "EVE", "language": "de"}
 
     try:
-        r = cffi_requests.get(EVENTIM_API, impersonate="chrome", timeout=20, params={
-            "search_term": search_slug,
-            "retail_partner": "EVE",
-            "language": "de",
-        })
+        # Check what's actually in stock
+        r = cffi_requests.get(EVENTIM_API, impersonate="chrome", timeout=20,
+                              params={**base_params, "in_stock": "true"})
         r.raise_for_status()
-        data = r.json()
+        in_stock_data = r.json()
     except Exception as e:
         return None, f"API error: {e}"
 
-    # Find our product in results
-    for pg in data.get("productGroups", []):
+    # Find our product in the in_stock results
+    for pg in in_stock_data.get("productGroups", []):
         for p in pg.get("products", []):
             if str(p.get("productId")) == product_id:
-                status = p.get("status", "")
                 tags = p.get("tags", [])
-                fansale_only = "FANSALE" in tags and status == "Available"
-
-                # ponytail: FANSALE tag = resale only, not regular tickets
-                if fansale_only and "TICKETDIRECT" in tags:
-                    # Has both regular and fansale - could be either
-                    # Check if there are non-FANSALE products in same group
-                    other_products = [op for op in pg.get("products", [])
-                                      if str(op.get("productId")) != product_id
-                                      and "FANSALE" not in op.get("tags", [])]
-                    if not other_products:
-                        return False, f"Nur Fansale (Wiederverkauf)"
-
-                if status == "Available" and "FANSALE" not in tags:
-                    return True, "Tickets verfügbar (regulär)"
-                elif status == "Available" and "FANSALE" in tags:
+                if "FANSALE" in tags and "TICKETDIRECT" not in tags:
                     return False, "Nur Fansale (Wiederverkauf)"
-                elif status == "SoldOut":
-                    return False, "Ausverkauft"
-                elif status == "Cancelled":
-                    return False, "Abgesagt"
-                else:
-                    return None, f"Status: {status}"
+                return True, "Tickets verfügbar"
+
+    # Not in stock — check if event exists at all
+    try:
+        r2 = cffi_requests.get(EVENTIM_API, impersonate="chrome", timeout=20, params=base_params)
+        r2.raise_for_status()
+        all_data = r2.json()
+    except Exception as e:
+        return None, f"API error: {e}"
+
+    for pg in all_data.get("productGroups", []):
+        for p in pg.get("products", []):
+            if str(p.get("productId")) == product_id:
+                tags = p.get("tags", [])
+                if "FANSALE" in tags:
+                    return False, "Nur Fansale (Wiederverkauf)"
+                return False, "Nicht verfügbar"
 
     return None, "Event nicht in API gefunden"
 
