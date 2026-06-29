@@ -123,12 +123,41 @@ def run_checks(data):
     save_data(data)
 
 
+def send_daily_summary(data):
+    """Send a daily status summary for all monitored events."""
+    if not data["events"]:
+        return
+    lines = ["Ticket-Check Tagesbericht:"]
+    for event in data["events"]:
+        status_map = {"available": "VERFUEGBAR", "unavailable": "Nicht verfuegbar",
+                      "unknown": "Unklar", "pending": "Ausstehend"}
+        status = status_map.get(event.get("last_status", ""), event.get("last_status", ""))
+        detail = event.get("last_detail", "")
+        lines.append(f"\n{event.get('name', '?')}: {status}")
+        if detail:
+            lines.append(f"  ({detail})")
+    msg = "\n".join(lines)
+    send_whatsapp(data["whatsapp"]["phone"], data["whatsapp"]["apikey"], msg)
+
+
+DAILY_SUMMARY_HOUR = int(os.environ.get("DAILY_SUMMARY_HOUR", "8"))
+
+
 def checker_loop():
-    """Background: check every 10 minutes."""
+    """Background: check every 10 minutes, daily summary at configured hour."""
+    last_summary_date = None
     while True:
         time.sleep(600)
         try:
-            run_checks(load_data())
+            data = load_data()
+            run_checks(data)
+
+            today = datetime.now().date()
+            now_hour = datetime.now().hour
+            if now_hour >= DAILY_SUMMARY_HOUR and last_summary_date != today:
+                data = load_data()  # reload after run_checks saved
+                send_daily_summary(data)
+                last_summary_date = today
         except Exception as e:
             print(f"Checker error: {e}")
 
